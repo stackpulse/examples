@@ -1,0 +1,198 @@
+apiVersion: stackpulse.io/v1
+kind: Playbook
+metadata:
+   name: redis-playbook
+   description: Retrieve information about REDIS instance/cluster and providet as context in Microsoft Teams
+steps:
+
+    # Retrieve generic info about the specified REDIS server
+    - id: get-redis-info
+      name: us-docker.pkg.dev/stackpulse/public/redis-info
+      runner: redis-env
+      env:
+        REDIS_IP: '{{ .trigger.Scope_PodName }}'
+
+    # Provide high-level information about the REDIS server in Microsoft Teams
+    - id: display-high-level-redis-info
+      name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      env:
+        TEAMS_TITLE: 'High Level Information about REDIS Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '*Selected Parameters* from REDIS:'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "Connected Clients", 
+              value: "{{ .Clients.connected_clients }}"
+            }, 
+            {
+              name: "Blocked Clients", 
+              value: "{{ .Clients.blocked_clients }}"
+            },
+            {
+              name: "Used Memory", 
+              value: "{{ .Memory.used_memory_human }}"
+            },         
+            {
+              name: "Peak Used Memory", 
+              value: "{{ .Memory.used_memory_peak_human }}"
+            },
+            {
+              name: "Replication Backlog Size", 
+              value: "{{ .Replication.repl_backlog_size }}"
+            },
+            {
+              name: "Server Uptime (Seconds)", 
+              value: "{{ .Server.uptime_in_seconds }}"
+            }            
+  
+    # Post the full information retrieved from the REDIS server in a separate Microsoft Teams message
+    - id: display-detailed-redis-info
+      name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      env:
+        TEAMS_TITLE: 'Detailed Information about REDIS Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '{{ .multiline }}'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+
+
+   # Get the list of currently connected clients
+    - name: us-docker.pkg.dev/stackpulse/public/redis-client-list
+      id: client-list
+      runner: redis-env      
+      env:
+        REDIS_IP: '{{ .trigger.Scope_PodName }}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/raw-output-parser
+        overrides:
+          output: "redis_clients_list"
+        
+
+    # Convert the REDIS Clients List format (https://redis.io/commands/client-list) to JSON that can be operated on
+    - id: process_redis_clients
+      name: leonidbelkind/inline-python
+      env:
+        INLINE_SCRIPT: |
+              import json
+
+              clients_list_output = """\
+              {{ .redis_clients_list }}
+              """
+
+              all_input_lines = clients_list_output.splitlines()
+              clients_collection = []
+
+              for line in all_input_lines:
+                  client = {}
+                  line = line.strip("\n")
+                  fields = line.split()
+
+                  for field in fields:
+                       key = field.split('=')
+                       client[key[0]]=key[1]
+
+                  clients_collection.append(client)
+                  print(json.dumps(clients_collection, indent=2))
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/json-parser
+
+    # Post the amount of connected clients and the info from the first connection to Microsoft Teams
+    - name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      id: post_clients_list
+      env:
+        TEAMS_TITLE: 'Clients List for REDIS Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '{{ .redis_clients_list }}'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "Connected Clients", 
+              value: "{{ len .output }}"
+            },
+            {
+              name: "#1 From", 
+              value: "{{ (index .output 0).addr }}"
+            },
+            {
+              name: "#1 Command", 
+              value: "{{ (index .output 0).cmd }}"
+            },
+            {
+              name: "#1 Age (Seconds)", 
+              value: "{{ (index .output 0).age }}"
+            }      
+
+
+    # Retrieve the data about big keys in REDIS
+    - name: us-docker.pkg.dev/stackpulse/public/redis-bigkeys
+      id: big-keys
+      runner: redis-env      
+      env:
+        REDIS_IP: '{{ .trigger.Scope_PodName }}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/raw-output-parser         
+
+    # Post the data about big keys in REDIS to Microsoft Teams
+    - name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      id: post_clients_list
+      env:
+        TEAMS_TITLE: 'Big Keys List for REDIS Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '{{ .output }}'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}        
+
+
+   # Retrieve the last 10 entries in the REDIS Slow Log
+    - name: us-docker.pkg.dev/stackpulse/public/redis-slowlog-secured
+      id: slowlog
+      runner: redis-env      
+      env:
+        REDIS_IP: '{{ .trigger.Scope_PodName }}'
+        REDIS_PASSWORD: '{{ secret "REDIS_PASSWORD" }}'
+        LAST_ENTRIES: '10'
+
+   # If the Slow Log is empty - notify about that on Teams
+   # (Please note, that if there are no entries, then .entries will be nil and len function can't be used on it)
+    - name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      id: no_slowlog_entries
+      when: '{{ if ne .entries nil }} {{ eq (len .entries) 0 }} {{ else }} false {{ end }}'
+      env:
+        TEAMS_TITLE: 'Slow logs for REDIS Server ip {{ .trigger.Scope_PodName }} is empty'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: 'Slow logs empty'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}      
+
+
+   # If the Slow Log is not empty - notify about a number of items
+   # (Please note, that if there are no entries, then .entries will be nil and len function can't be used on it)
+    - name: us-docker.pkg.dev/stackpulse/public/teams-message:rc0.7
+      id: post_slowlog_entries
+      when: '{{ if ne .entries nil }} {{ gt (len .entries) 0 }} {{ else }} false {{ end }}'
+      env:
+        TEAMS_TITLE: '{{ len .entries }} slow logs for REDIS Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '{{ len .entries }} slow logs found'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "Slow Log Entry #1", 
+              value: "At : {{ if ne .entries nil }} {{ if gt (len .entries 0) }} {{ (index .entries 0).start_time }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} : {{ if ne .entries nil }} {{ if gt (len .entries 0) }} {{ (index .entries 0).command }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} For: {{ if ne .entries nil }} {{ if gt (len .entries 0) }} {{ (index .entries 0).duration }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }}"
+            }, 
+            {
+              name: "Slow Log Entry #2", 
+              value: "At : {{ if ne .entries nil }} {{ if gt (len .entries 1) }} {{ (index .entries 1).start_time }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} : {{ if ne .entries nil }} {{ if gt (len .entries 1) }} {{ (index .entries 1).command }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} For: {{ if ne .entries nil }} {{ if gt (len .entries 1) }} {{ (index .entries 1).duration }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }}"
+            },
+            {
+              name: "Slow Log Entry #3", 
+              value: "At : {{ if ne .entries nil }} {{ if gt (len .entries 2) }} {{ (index .entries 2).start_time }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} : {{ if ne .entries nil }} {{ if gt (len .entries 2) }} {{ (index .entries 2).command }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} For: {{ if ne .entries nil }} {{ if gt (len .entries 2) }} {{ (index .entries 2).duration }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }}"
+            },
+            {
+              name: "Slow Log Entry #4", 
+              value: "At : {{ if ne .entries nil }} {{ if gt (len .entries 3) }} {{ (index .entries 3).start_time }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} : {{ if ne .entries nil }} {{ if gt (len .entries 3) }} {{ (index .entries 3).command }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }} For: {{ if ne .entries nil }} {{ if gt (len .entries 3) }} {{ (index .entries 3).duration }} {{else }} N/A {{ end }} {{ else }} N/A {{ end }}"
+            }
