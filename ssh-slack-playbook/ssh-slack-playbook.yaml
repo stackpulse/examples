@@ -1,0 +1,75 @@
+apiVersion: stackpulse.io/v1
+kind: Playbook
+metadata:
+  name: ssh-slack-playbooke
+  description: Execute remote commands on the machine, present their output via Slack, then ask the user for some 
+steps:
+
+  # Run a set of SSH commands ont he remote host. Capture all of the output in a single variable {{ .output }} as a multiline string 
+  - id: run_ssh_command_on_host
+    name: us-docker.pkg.dev/stackpulse/public/ssh-command:rc0.7
+    runner: private-env
+    env: 
+      SSH_CLIENT: "ec2-user@{{ .trigger.Scope_PodName}}"
+      SSH_COMMAND: |
+        uname -a;
+        df -k;
+        ls -l ~/
+      SSH_KEY: '{{ secret "SSH_KEY" }}'
+    output_parser:
+      name: us-docker.pkg.dev/stackpulse/public/raw-output-parser
+
+  # Display the output of the SSH commands performed on the machine (in channel - #critical-alerts)
+  - id: show_SSH_commands_output
+    name: gcr.io/stackpulse/steps/slack/send_dynamic_message
+    envFrom:
+      integrationRef: SlackEnv    
+    env:
+      SP_REDIRECT_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+      RECIPIENTS: "#critical-alerts"    
+      MESSAGE_TEXT: |
+        Results of commands on machine {{ .trigger.Scope_PodName}}:
+        {{ .output }}
+
+  # Ask the user whether to run additional investigative commands on the machine
+  - id: suggest_additional_investigation
+    name: gcr.io/stackpulse/steps/slack/send_interactive_message
+    envFrom:
+      integrationRef: SlackEnv    
+    env:
+      SP_REDIRECT_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+      HEADER_MESSAGE: Run additional commands on {{ .trigger.Scope_PodName}}?
+      RECIPIENTS: "#critical-alerts"
+      QUESTION: "Would you like run additional investigation commands on {{ .trigger.Scope_PodName}}?"
+      RESPONSES_JSON: '{ "Yes": "Yes", "No":"No" }'
+      MESSAGE_TYPE: "BUTTONS_SELECT"
+      TIMEOUT: "1m"
+      DEFAULT_RESPONSE: "No"
+
+  # If a "yes" response was received to the question posted to the Slack Channel, perform additional investigation  
+  - id: run_additional_ssh_commands_on_host
+    name: us-docker.pkg.dev/stackpulse/public/ssh-command:rc0.7
+    when: '{{ eq .slack_response "Yes" }}'
+    runner: private-env
+    env: 
+      SSH_CLIENT: "ec2-user@{{ .trigger.Scope_PodName}}"
+      SSH_COMMAND: |
+        netstat -tulpn;
+        iptables -S;
+        sestatus
+      SSH_KEY: '{{ secret "SSH_KEY" }}'
+    output_parser:
+      name: us-docker.pkg.dev/stackpulse/public/raw-output-parser
+
+
+  - id: show_additional_SSH_commands_output
+    name: gcr.io/stackpulse/steps/slack/send_dynamic_message
+    when: '{{ eq .slack_response "Yes" }}'    
+    envFrom:
+      integrationRef: SlackEnv    
+    env:
+      SP_REDIRECT_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+      RECIPIENTS: "#critical-alerts"    
+      MESSAGE_TEXT: |
+        Results of additional commands on machine {{ .trigger.Scope_PodName}}:
+        {{ .output }}      
