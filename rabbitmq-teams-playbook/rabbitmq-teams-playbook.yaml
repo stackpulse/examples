@@ -1,0 +1,159 @@
+apiVersion: stackpulse.io/v1
+kind: Playbook
+metadata:
+   name: rabbitmq-playbook
+   description: Collect troubleshooting information from RabbitMQ instance/cluster and display it in Microsoft Teams
+steps:
+
+    # Retrieve an overview of RabbitMQ Server configuraiton and stats
+    - name: us-docker.pkg.dev/stackpulse/public/rabbitmq-overview
+      id: rabbitmq-overview
+      runner: rabbitmq-env      
+      env:
+        HOST: '{{ .trigger.Scope_PodName }}'
+        USERNAME: '{{ secret "RABBITMQ_USER"}}' 
+        PASSWORD: '{{ secret "RABBITMQ_PASSWORD"}}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/json-parser     
+
+    # Display the cluster name and sample stats data in Microsoft Teams
+    - id: display-rabbitmq-data
+      name: leonidbelkind/teams-snippet-post
+      env:
+        TEAMS_TITLE: 'High Level Information about RabbitMQ Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '*Selected Parameters* from RabbitMQ:'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "Cluster Name", 
+              value: "{{ .cluster_name }}"
+            }, 
+            {
+              name: "Deliver Details - Rate", 
+              value: "{{ .message_stats.deliver_details.rate }}"
+            },
+            {
+              name: "Get No Ack Details - Rate", 
+              value: "{{ .message_stats.get_no_ack_details.rate }}"
+            },         
+            {
+              name: "Redeliver Details - Rate", 
+              value: "{{ .message_stats.redeliver_details.rate }}"
+            },
+            {
+              name: "Channel Closed Details - Rate", 
+              value: "{{ .churn_rates.channel_closed_details.rate }}"
+            },
+            {
+              name: "Channels", 
+              value: "{{ .object_totals.channels }}"
+            },
+            {
+              name: "Connections", 
+              value: "{{ .object_totals.connections }}"
+            },
+            {
+              name: "Consumers", 
+              value: "{{ .object_totals.consumers }}"
+            },
+            {
+              name: "Exchanges", 
+              value: "{{ .object_totals.exchanges }}"
+            },
+            {
+              name: "Queues", 
+              value: "{{ .object_totals.queues }}"
+            }                 
+
+    # Retrieve detailed information about RabbitMQ Channels
+    - name: us-docker.pkg.dev/stackpulse/public/rabbitmq-channels
+      id: rabbitmq-channels
+      runner: rabbitmq-env
+      env:
+        HOST: '{{ .trigger.Scope_PodName }}'
+        USERNAME: '{{ secret "RABBITMQ_USER"}}' 
+        PASSWORD: '{{ secret "RABBITMQ_PASSWORD"}}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/json-parser
+
+    # Display sample data for the 1st channel
+    - id: display-channel-data
+      name: leonidbelkind/teams-snippet-post
+      env:
+        TEAMS_TITLE: 'Channels information from RabbitMQ Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '*Selected Chanels from RabbitMQ:'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "# of Channels", 
+              value: " {{ len .output }}"
+            }, 
+            {
+              name: "Connection Details - Channel #1", 
+              value: "{{ (index .output 0).connection_details.name }}"
+            }
+
+    # Retrieve detailed information about RabbitMQ connections
+    - name: us-docker.pkg.dev/stackpulse/public/rabbitmq-connections
+      id: rabbitmq-connections
+      runner: rabbitmq-env
+      env:
+        HOST: '{{ .trigger.Scope_PodName }}'
+        USERNAME: '{{ secret "RABBITMQ_USER"}}' 
+        PASSWORD: '{{ secret "RABBITMQ_PASSWORD"}}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/json-parser
+
+    # Display sample data about the 1st connection
+    - id: display-connection-data
+      name: leonidbelkind/teams-snippet-post
+      env:
+        TEAMS_TITLE: 'Connections information from RabbitMQ Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '*Selected Connections from RabbitMQ:'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "# of Connections", 
+              value: " {{ len .output }}"
+            }, 
+            {
+              name: "Send Pending - Connection #1", 
+              value: "{{ (index .output 0).send_pend }}"
+            }
+
+
+    # Retrieve detailed information about RabbitMQ consumers
+    - name: us-docker.pkg.dev/stackpulse/public/rabbitmq-consumers
+      id: rabbitmq-consumers
+      runner: rabbitmq-env
+      env:
+        HOST: '{{ .trigger.Scope_PodName }}'
+        USERNAME: '{{ secret "RABBITMQ_USER"}}' 
+        PASSWORD: '{{ secret "RABBITMQ_PASSWORD"}}'
+      output_parser:
+        name: us-docker.pkg.dev/stackpulse/public/json-parser
+
+
+    # Display sample data about the 1st consumer
+    - name: leonidbelkind/teams-snippet-post
+      env:
+        TEAMS_TITLE: 'Consumers information from RabbitMQ Server ip {{ .trigger.Scope_PodName }}'
+        TEAMS_WEBHOOK: '{{ secret "TEAMS_ALERTS_CONNECTOR" }}'
+        TEAMS_CONTENT: '*Selected Consumers from RabbitMQ:'
+        TEAMS_URL_TITLE: "Execution Details"
+        TEAMS_URL: https://app.stackpulse.io/execution/{{ .execution.id }}
+        TEAMS_TABLE_DATA:  |
+            {
+              name: "# of Consumers", 
+              value: " {{ len .output }}"
+            }, 
+            {
+              name: "Activity Status - Consumer #1", 
+              value: "{{ (index .output 0).activity_status }}"
+            }
