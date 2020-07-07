@@ -1,3 +1,5 @@
+![StackPulse Logo](img/stackpulse_logo.png)
+
 # StackPulse Examples Repository
 
 ## What is it
