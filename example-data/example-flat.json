@@ -1,0 +1,17 @@
+{
+    "computer1": {
+        "name": "host1",
+        "address-public": "public.address.1",
+        "address-private": "private.address.1"
+    },
+    "computer2": {
+        "name": "host2",
+        "address-public": "public.address.2",
+        "address-private": "private.address.2"
+    },
+    "computer3": {
+        "name": "host3",
+        "address-public": "public.address.3",
+        "address-private": "private.address.3"
+    }
+}
