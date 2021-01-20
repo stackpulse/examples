@@ -1,0 +1,31 @@
+{
+    "computers": [
+        {
+            "name": "computer1",
+            "address": [
+                {
+                    "public": "some.publicaddress.1",
+                    "private": "some.privateaddress.1"
+                }
+            ]
+        },
+        {
+            "name": "computer2",
+            "address": [
+                {
+                    "public": "some.publicaddress.2",
+                    "private": "some.privateaddress.2"
+                }
+            ]
+        },
+        {
+            "name": "computer3",
+            "address": [
+                {
+                    "public": "some.publicaddress.2",
+                    "private": "some.privateaddress21"
+                }
+            ]
+        }
+    ]
+}

@@ -1,0 +1,15 @@
+{
+	"computers": [{
+			"name": "computer1",
+			"address": "some.address.1"
+		},
+		{
+			"name": "computer2",
+			"address": "some.address.2"
+		},
+		{
+			"name": "computer3",
+			"address": "some.address.3"
+		}
+	]
+}
